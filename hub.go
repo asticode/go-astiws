@@ -15,10 +15,11 @@ const (
 
 // Hub represents a websocket Hub
 type Hub struct {
-	clients  map[*Client]bool
-	Logger   xlog.Logger
-	mutex    *sync.RWMutex
-	Upgrader websocket.Upgrader
+	clients        map[*Client]bool
+	HandlerWelcome func(r *http.Request, c *Client) error
+	Logger         xlog.Logger
+	mutex          *sync.RWMutex
+	Upgrader       websocket.Upgrader
 }
 
 // New creates a new hub
@@ -74,6 +75,13 @@ func (h *Hub) ServeHTTP(rw http.ResponseWriter, r *http.Request) (err error) {
 
 	// Read
 	go c.read()
+
+	// Welcome client
+	if h.HandlerWelcome != nil {
+		if err = h.HandlerWelcome(r, c); err != nil {
+			return
+		}
+	}
 
 	// Wait is the blocking pattern
 	return c.wait()

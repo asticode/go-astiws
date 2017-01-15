@@ -56,9 +56,10 @@ func (c *Client) wait() (err error) {
 	}
 }
 
-// write writes a message to the client
-func (c *Client) write(mt int, b []byte) error {
+// Write writes a message to the client
+func (c *Client) Write(mt int, b []byte) error {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
+	c.logger.Debugf("Writing %s to client %p", string(b), c)
 	return c.conn.WriteMessage(mt, b)
 }
