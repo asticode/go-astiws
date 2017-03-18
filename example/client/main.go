@@ -6,6 +6,8 @@ import (
 	"sync"
 	"time"
 
+	"encoding/json"
+
 	"github.com/asticode/go-astilog"
 	"github.com/asticode/go-astiws"
 	"github.com/rs/xlog"
@@ -91,13 +93,13 @@ func main() {
 }
 
 // HandleAsticodedFirst handles asticoded events
-func HandleAsticodedFirst(c *astiws.Client, eventName string, payload interface{}) (err error) {
+func HandleAsticodedFirst(c *astiws.Client, eventName string, payload json.RawMessage) (err error) {
 	c.Logger.Debugf("Client %p is handling an asticoded event (1/2)", c)
 	return
 }
 
 // HandleAsticodedSecond handles asticoded events
-func HandleAsticodedSecond(c *astiws.Client, eventName string, payload interface{}) (err error) {
+func HandleAsticodedSecond(c *astiws.Client, eventName string, payload json.RawMessage) (err error) {
 	c.Logger.Debugf("Client %p is handling an asticoded event (2/2)", c)
 	return
 }

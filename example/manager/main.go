@@ -5,6 +5,8 @@ import (
 	"flag"
 	"net/http"
 
+	"encoding/json"
+
 	"github.com/asticode/go-astilog"
 	"github.com/asticode/go-astiws"
 	"github.com/julienschmidt/httprouter"
@@ -85,11 +87,11 @@ func AdaptClient(c *astiws.Client) {
 }
 
 // HandleAsticode handles asticode events
-func HandleAsticode(c *astiws.Client, eventName string, payload interface{}) (err error) {
-	// Assert payload
-	var b, ok bool
-	if b, ok = payload.(bool); !ok {
-		c.Logger.Errorf("Payload %+v is not a bool", payload)
+func HandleAsticode(c *astiws.Client, eventName string, payload json.RawMessage) (err error) {
+	// Unmarshal payload
+	var b bool
+	if errUnmarshal := json.Unmarshal(payload, &b); errUnmarshal != nil {
+		c.Logger.Errorf("%s while unmarshaling payload %s", err, string(payload))
 		return
 	}
 

@@ -10,7 +10,7 @@ import (
 )
 
 // ListenerFunc represents a listener callback
-type ListenerFunc func(c *Client, eventName string, payload interface{}) error
+type ListenerFunc func(c *Client, eventName string, payload json.RawMessage) error
 
 // Client represents a hub client
 type Client struct {
@@ -52,6 +52,13 @@ func (c *Client) Dial(addr string) (err error) {
 	return
 }
 
+// BodyMessageRead represents the body of a message for read purposes
+// Indeed when reading the body, we need the payload to be a json.RawMessage
+type BodyMessageRead struct {
+	BodyMessage
+	Payload json.RawMessage `json:"payload"`
+}
+
 // Read reads from the client
 func (c *Client) Read() (err error) {
 	c.conn.SetReadLimit(int64(c.maxMessageSize))
@@ -66,7 +73,7 @@ func (c *Client) Read() (err error) {
 		}
 
 		// Unmarshal
-		var b BodyMessage
+		var b BodyMessageRead
 		if err = json.Unmarshal(m, &b); err != nil {
 			return
 		}
