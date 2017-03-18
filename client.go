@@ -34,7 +34,9 @@ func NewClient(maxMessageSize int) *Client {
 // Close closes the client properly
 func (c *Client) Close() {
 	c.Logger.Debugf("Closing astiws client %p", c)
-	c.conn.Close()
+	if c.conn != nil {
+		c.conn.Close()
+	}
 }
 
 // Dial dials an addr
