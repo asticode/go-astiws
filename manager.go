@@ -8,6 +8,9 @@ import (
 	"github.com/rs/xlog"
 )
 
+// ClientAdapter represents a client adapter func
+type ClientAdapter func(c *Client)
+
 // Manager represents a websocket manager
 type Manager struct {
 	clients  map[*Client]bool
@@ -55,7 +58,7 @@ func (m *Manager) registerClient(c *Client) {
 }
 
 // ServeHTTP handles an HTTP request and returns an error unlike an http.Handler
-func (m *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request, a func(c *Client)) (err error) {
+func (m *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request, a ClientAdapter) (err error) {
 	// Init client
 	var c = NewClient(m.Upgrader.WriteBufferSize)
 	defer c.Close()
