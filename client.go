@@ -9,6 +9,11 @@ import (
 	"github.com/rs/xlog"
 )
 
+// Constants
+const (
+	EventNameDisconnect = "astiws.disconnect"
+)
+
 // ListenerFunc represents a listener callback
 type ListenerFunc func(c *Client, eventName string, payload json.RawMessage) error
 
@@ -61,6 +66,9 @@ type BodyMessageRead struct {
 
 // Read reads from the client
 func (c *Client) Read() (err error) {
+	defer c.executeListeners(EventNameDisconnect, json.RawMessage{})
+
+	// Loop
 	c.conn.SetReadLimit(int64(c.maxMessageSize))
 	for {
 		// Read message
@@ -79,14 +87,21 @@ func (c *Client) Read() (err error) {
 		}
 
 		// Execute listener callbacks
-		if fs, ok := c.listeners[b.EventName]; ok {
-			for _, f := range fs {
-				if err = f(c, b.EventName, b.Payload); err != nil {
-					return
-				}
+		c.executeListeners(b.EventName, b.Payload)
+	}
+	return
+}
+
+// executeListeners executes listeners for a specific event
+func (c *Client) executeListeners(eventName string, payload json.RawMessage) (err error) {
+	if fs, ok := c.listeners[eventName]; ok {
+		for _, f := range fs {
+			if err = f(c, eventName, payload); err != nil {
+				return
 			}
 		}
 	}
+	return
 }
 
 // BodyMessage represents the body of a message
