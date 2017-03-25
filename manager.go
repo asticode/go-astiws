@@ -13,7 +13,7 @@ type ClientAdapter func(c *Client)
 
 // Manager represents a websocket manager
 type Manager struct {
-	clients  map[*Client]bool
+	clients  map[interface{}]*Client
 	Logger   xlog.Logger
 	mutex    *sync.RWMutex
 	Upgrader websocket.Upgrader
@@ -22,13 +22,31 @@ type Manager struct {
 // NewManager creates a new manager
 func NewManager(maxMessageSize int) *Manager {
 	return &Manager{
-		clients: make(map[*Client]bool),
+		clients: make(map[interface{}]*Client),
 		Logger:  xlog.NopLogger,
 		mutex:   &sync.RWMutex{},
 		Upgrader: websocket.Upgrader{
 			ReadBufferSize:  maxMessageSize,
 			WriteBufferSize: maxMessageSize,
 		},
+	}
+}
+
+// Client returns the client stored with the specific key
+func (m *Manager) Client(k interface{}) (c *Client, ok bool) {
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
+	c, ok = m.clients[k]
+	return
+}
+
+// Close closes the manager properly
+func (m *Manager) Close() {
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
+	m.Logger.Debugf("Closing astiws manager %p", m)
+	for _, c := range m.clients {
+		c.Close()
 	}
 }
 
@@ -39,25 +57,17 @@ func (m *Manager) CountClients() int {
 	return len(m.clients)
 }
 
-// Close closes the manager properly
-func (m *Manager) Close() {
-	m.mutex.RLock()
-	defer m.mutex.RUnlock()
-	m.Logger.Debugf("Closing astiws manager %p", m)
-	for c := range m.clients {
-		c.Close()
-	}
-}
-
-// registerClient registers a new client
-func (m *Manager) registerClient(c *Client) {
+// RegisterClient registers a new client
+func (m *Manager) RegisterClient(k interface{}, c *Client) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
-	m.Logger.Debugf("Registering client %p in astiws manager %p", c, m)
-	m.clients[c] = true
+	m.Logger.Debugf("Registering client %p in astiws manager %p with key %+v", c, m, k)
+	m.clients[k] = c
 }
 
 // ServeHTTP handles an HTTP request and returns an error unlike an http.Handler
+// We don't want to register the client yet, since we may want to index the map of clients with an information we don't
+// have yet
 func (m *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request, a ClientAdapter) (err error) {
 	// Init client
 	var c = NewClient(m.Upgrader.WriteBufferSize)
@@ -67,10 +77,6 @@ func (m *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request, a ClientAdap
 		return
 	}
 
-	// Register client in the manager
-	m.registerClient(c)
-	defer m.unregisterClient(c)
-
 	// Adapt client
 	a(c)
 
@@ -78,10 +84,11 @@ func (m *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request, a ClientAdap
 	return c.Read()
 }
 
-// unregisterClient unregisters a client
-func (m *Manager) unregisterClient(c *Client) {
+// UnregisterClient unregisters a client
+// astiws.disconnected event is a good place to call this function
+func (m *Manager) UnregisterClient(k interface{}) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
-	m.Logger.Debugf("Unregistering client %p in astiws manager %p", c, m)
-	delete(m.clients, c)
+	m.Logger.Debugf("Unregistering client in astiws manager %p with key %+v", m, k)
+	delete(m.clients, k)
 }
