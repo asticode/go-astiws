@@ -45,8 +45,9 @@ func (m *Manager) Close() {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
 	m.Logger.Debugf("Closing astiws manager %p", m)
-	for _, c := range m.clients {
+	for k, c := range m.clients {
 		c.Close()
+		delete(m.clients, k)
 	}
 }
 
