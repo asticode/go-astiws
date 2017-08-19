@@ -6,6 +6,7 @@ import (
 
 	"github.com/asticode/go-astilog"
 	"github.com/gorilla/websocket"
+	"github.com/pkg/errors"
 )
 
 // ClientAdapter represents a client adapter func
@@ -72,6 +73,7 @@ func (m *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request, a ClientAdap
 	var c = NewClient(m.Upgrader.WriteBufferSize)
 	defer c.Close()
 	if c.conn, err = m.Upgrader.Upgrade(w, r, nil); err != nil {
+		err = errors.Wrap(err, "upgrading conn failed")
 		return
 	}
 
@@ -79,7 +81,11 @@ func (m *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request, a ClientAdap
 	a(c)
 
 	// Read
-	return c.Read()
+	if err = c.Read(); err != nil {
+		err = errors.Wrap(err, "reading failed")
+		return
+	}
+	return
 }
 
 // UnregisterClient unregisters a client

@@ -4,14 +4,18 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/asticode/go-astilog"
 	"github.com/gorilla/websocket"
+	"github.com/pkg/errors"
 )
 
 // Constants
 const (
 	EventNameDisconnect = "astiws.disconnect"
+	pingPeriod          = (pongWait * 9) / 10
+	pongWait            = 60 * time.Second
 )
 
 // ListenerFunc represents a listener callback
@@ -19,18 +23,20 @@ type ListenerFunc func(c *Client, eventName string, payload json.RawMessage) err
 
 // Client represents a hub client
 type Client struct {
-	conn           *websocket.Conn
-	listeners      map[string][]ListenerFunc
-	maxMessageSize int
-	mutex          *sync.RWMutex
+	channelStopPing chan bool
+	conn            *websocket.Conn
+	listeners       map[string][]ListenerFunc
+	maxMessageSize  int
+	mutex           *sync.RWMutex
 }
 
 // NewClient creates a new client
 func NewClient(maxMessageSize int) *Client {
 	return &Client{
-		listeners:      make(map[string][]ListenerFunc),
-		maxMessageSize: maxMessageSize,
-		mutex:          &sync.RWMutex{},
+		channelStopPing: make(chan bool),
+		listeners:       make(map[string][]ListenerFunc),
+		maxMessageSize:  maxMessageSize,
+		mutex:           &sync.RWMutex{},
 	}
 }
 
@@ -39,6 +45,10 @@ func (c *Client) Close() {
 	astilog.Debugf("Closing astiws client %p", c)
 	if c.conn != nil {
 		c.conn.Close()
+	}
+	if c.channelStopPing != nil {
+		close(c.channelStopPing)
+		c.channelStopPing = nil
 	}
 }
 
@@ -51,8 +61,30 @@ func (c *Client) Dial(addr string) (err error) {
 
 	// Dial
 	astilog.Debugf("Dialing %s with client %p", addr, c)
-	c.conn, _, err = websocket.DefaultDialer.Dial(addr, nil)
+	if c.conn, _, err = websocket.DefaultDialer.Dial(addr, nil); err != nil {
+		err = errors.Wrapf(err, "dialing %s failed", addr)
+		return
+	}
+
+	// Ping
+	go c.ping()
 	return
+}
+
+// ping writes a ping message in the connection
+func (c *Client) ping() {
+	var t = time.NewTicker(pingPeriod)
+	defer t.Stop()
+	for {
+		select {
+		case <-c.channelStopPing:
+			return
+		case <-t.C:
+			if err := c.conn.WriteMessage(websocket.PingMessage, []byte{}); err != nil {
+				astilog.Error(errors.Wrap(err, "sending ping message failed"))
+			}
+		}
+	}
 }
 
 // BodyMessageRead represents the body of a message for read purposes
@@ -68,6 +100,8 @@ func (c *Client) Read() (err error) {
 
 	// Loop
 	c.conn.SetReadLimit(int64(c.maxMessageSize))
+	c.conn.SetReadDeadline(time.Now().Add(pongWait))
+	c.conn.SetPongHandler(func(string) error { c.conn.SetReadDeadline(time.Now().Add(pongWait)); return nil })
 	for {
 		// Read message
 		var m []byte
@@ -75,12 +109,14 @@ func (c *Client) Read() (err error) {
 			// We need to close the connection here since we want the client to know the connection is not
 			// usable anymore for writing
 			c.conn.Close()
+			err = errors.Wrap(err, "reading message failed")
 			return
 		}
 
 		// Unmarshal
 		var b BodyMessageRead
 		if err = json.Unmarshal(m, &b); err != nil {
+			err = errors.Wrap(err, "unmarshaling message failed")
 			return
 		}
 
@@ -95,6 +131,7 @@ func (c *Client) executeListeners(eventName string, payload json.RawMessage) (er
 	if fs, ok := c.listeners[eventName]; ok {
 		for _, f := range fs {
 			if err = f(c, eventName, payload); err != nil {
+				err = errors.Wrapf(err, "executing listener for event %s failed", eventName)
 				return
 			}
 		}
@@ -122,12 +159,17 @@ func (c *Client) Write(eventName string, payload interface{}) (err error) {
 	// Marshal
 	var b []byte
 	if b, err = json.Marshal(BodyMessage{EventName: eventName, Payload: payload}); err != nil {
+		err = errors.Wrap(err, "marshaling message failed")
 		return
 	}
 
 	// Write message
 	astilog.Debugf("Writing %s to astiws client %p", string(b), c)
-	return c.conn.WriteMessage(websocket.BinaryMessage, b)
+	if err = c.conn.WriteMessage(websocket.BinaryMessage, b); err != nil {
+		err = errors.Wrap(err, "writing message failed")
+		return
+	}
+	return
 }
 
 // AddListener adds a listener
