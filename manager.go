@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"sync"
 
+	"github.com/asticode/go-astilog"
 	"github.com/gorilla/websocket"
-	"github.com/rs/xlog"
 )
 
 // ClientAdapter represents a client adapter func
@@ -14,7 +14,6 @@ type ClientAdapter func(c *Client)
 // Manager represents a websocket manager
 type Manager struct {
 	clients  map[interface{}]*Client
-	Logger   xlog.Logger
 	mutex    *sync.RWMutex
 	Upgrader websocket.Upgrader
 }
@@ -23,7 +22,6 @@ type Manager struct {
 func NewManager(maxMessageSize int) *Manager {
 	return &Manager{
 		clients: make(map[interface{}]*Client),
-		Logger:  xlog.NopLogger,
 		mutex:   &sync.RWMutex{},
 		Upgrader: websocket.Upgrader{
 			ReadBufferSize:  maxMessageSize,
@@ -44,7 +42,7 @@ func (m *Manager) Client(k interface{}) (c *Client, ok bool) {
 func (m *Manager) Close() {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
-	m.Logger.Debugf("Closing astiws manager %p", m)
+	astilog.Debugf("Closing astiws manager %p", m)
 	for k, c := range m.clients {
 		c.Close()
 		delete(m.clients, k)
@@ -62,7 +60,7 @@ func (m *Manager) CountClients() int {
 func (m *Manager) RegisterClient(k interface{}, c *Client) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
-	m.Logger.Debugf("Registering client %p in astiws manager %p with key %+v", c, m, k)
+	astilog.Debugf("Registering client %p in astiws manager %p with key %+v", c, m, k)
 	m.clients[k] = c
 }
 
@@ -73,7 +71,6 @@ func (m *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request, a ClientAdap
 	// Init client
 	var c = NewClient(m.Upgrader.WriteBufferSize)
 	defer c.Close()
-	c.Logger = m.Logger
 	if c.conn, err = m.Upgrader.Upgrade(w, r, nil); err != nil {
 		return
 	}
@@ -90,6 +87,6 @@ func (m *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request, a ClientAdap
 func (m *Manager) UnregisterClient(k interface{}) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
-	m.Logger.Debugf("Unregistering client in astiws manager %p with key %+v", m, k)
+	astilog.Debugf("Unregistering client in astiws manager %p with key %+v", m, k)
 	delete(m.clients, k)
 }

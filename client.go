@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/asticode/go-astilog"
 	"github.com/gorilla/websocket"
-	"github.com/rs/xlog"
 )
 
 // Constants
@@ -21,7 +21,6 @@ type ListenerFunc func(c *Client, eventName string, payload json.RawMessage) err
 type Client struct {
 	conn           *websocket.Conn
 	listeners      map[string][]ListenerFunc
-	Logger         xlog.Logger
 	maxMessageSize int
 	mutex          *sync.RWMutex
 }
@@ -30,7 +29,6 @@ type Client struct {
 func NewClient(maxMessageSize int) *Client {
 	return &Client{
 		listeners:      make(map[string][]ListenerFunc),
-		Logger:         xlog.NopLogger,
 		maxMessageSize: maxMessageSize,
 		mutex:          &sync.RWMutex{},
 	}
@@ -38,7 +36,7 @@ func NewClient(maxMessageSize int) *Client {
 
 // Close closes the client properly
 func (c *Client) Close() {
-	c.Logger.Debugf("Closing astiws client %p", c)
+	astilog.Debugf("Closing astiws client %p", c)
 	if c.conn != nil {
 		c.conn.Close()
 	}
@@ -52,7 +50,7 @@ func (c *Client) Dial(addr string) (err error) {
 	}
 
 	// Dial
-	c.Logger.Debugf("Dialing %s with client %p", addr, c)
+	astilog.Debugf("Dialing %s with client %p", addr, c)
 	c.conn, _, err = websocket.DefaultDialer.Dial(addr, nil)
 	return
 }
@@ -128,7 +126,7 @@ func (c *Client) Write(eventName string, payload interface{}) (err error) {
 	}
 
 	// Write message
-	c.Logger.Debugf("Writing %s to astiws client %p", string(b), c)
+	astilog.Debugf("Writing %s to astiws client %p", string(b), c)
 	return c.conn.WriteMessage(websocket.BinaryMessage, b)
 }
 
