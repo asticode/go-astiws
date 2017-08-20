@@ -14,8 +14,8 @@ import (
 // Constants
 const (
 	EventNameDisconnect = "astiws.disconnect"
-	pingPeriod          = (pongWait * 9) / 10
-	pongWait            = 60 * time.Second
+	pingPeriod          = (pingWait * 9) / 10
+	pingWait            = 60 * time.Second
 )
 
 // ListenerFunc represents a listener callback
@@ -65,10 +65,14 @@ func (c *Client) Dial(addr string) (err error) {
 		err = errors.Wrapf(err, "dialing %s failed", addr)
 		return
 	}
-
-	// Ping
-	go c.ping()
 	return
+}
+
+// BodyMessageRead represents the body of a message for read purposes
+// Indeed when reading the body, we need the payload to be a json.RawMessage
+type BodyMessageRead struct {
+	BodyMessage
+	Payload json.RawMessage `json:"payload"`
 }
 
 // ping writes a ping message in the connection
@@ -80,28 +84,28 @@ func (c *Client) ping() {
 		case <-c.channelStopPing:
 			return
 		case <-t.C:
+			c.mutex.Lock()
 			if err := c.conn.WriteMessage(websocket.PingMessage, []byte{}); err != nil {
 				astilog.Error(errors.Wrap(err, "sending ping message failed"))
 			}
+			c.mutex.Unlock()
 		}
 	}
-}
-
-// BodyMessageRead represents the body of a message for read purposes
-// Indeed when reading the body, we need the payload to be a json.RawMessage
-type BodyMessageRead struct {
-	BodyMessage
-	Payload json.RawMessage `json:"payload"`
 }
 
 // Read reads from the client
 func (c *Client) Read() (err error) {
 	defer c.executeListeners(EventNameDisconnect, json.RawMessage{})
 
-	// Loop
+	// Update conn
 	c.conn.SetReadLimit(int64(c.maxMessageSize))
-	c.conn.SetReadDeadline(time.Now().Add(pongWait))
-	c.conn.SetPongHandler(func(string) error { c.conn.SetReadDeadline(time.Now().Add(pongWait)); return nil })
+	c.conn.SetReadDeadline(time.Now().Add(pingWait))
+	c.conn.SetPingHandler(func(string) error { c.conn.SetReadDeadline(time.Now().Add(pingWait)); return nil })
+
+	// Ping
+	go c.ping()
+
+	// Loop
 	for {
 		// Read message
 		var m []byte
