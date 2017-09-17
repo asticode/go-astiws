@@ -10,7 +10,6 @@ import (
 	"github.com/asticode/go-astilog"
 	"github.com/asticode/go-astiws"
 	"github.com/julienschmidt/httprouter"
-	"github.com/rs/xlog"
 )
 
 // Constants
@@ -24,25 +23,22 @@ var (
 )
 
 func main() {
-	// Parse flags
+	// Init
 	flag.Parse()
-
-	// Init logger
-	var l = xlog.New(astilog.NewConfig(astilog.FlagConfig()))
+	astilog.FlagInit()
 
 	// Init manager
 	var m = astiws.NewManager(1024)
 	defer m.Close()
-	m.Logger = l
 
 	// Init router
 	var r = httprouter.New()
 	r.GET("/", Handle)
 
 	// Serve
-	l.Debugf("Listening and serving on %s", *addr)
+	astilog.Debugf("Listening and serving on %s", *addr)
 	if err := http.ListenAndServe(*addr, AdaptHandler(r, m)); err != nil {
-		l.Fatal(err)
+		astilog.Fatal(err)
 	}
 }
 
@@ -53,7 +49,7 @@ func Handle(rw http.ResponseWriter, r *http.Request, p httprouter.Params) {
 
 	// Serve
 	if err := m.ServeHTTP(rw, r, AdaptClient); err != nil {
-		m.Logger.Error(err)
+		astilog.Error(err)
 		return
 	}
 }
@@ -91,18 +87,18 @@ func HandleAsticode(c *astiws.Client, eventName string, payload json.RawMessage)
 	// Unmarshal payload
 	var b bool
 	if errUnmarshal := json.Unmarshal(payload, &b); errUnmarshal != nil {
-		c.Logger.Errorf("%s while unmarshaling payload %s", err, string(payload))
+		astilog.Errorf("%s while unmarshaling payload %s", err, string(payload))
 		return
 	}
 
 	// Answer
 	if b {
 		if err = c.Write("asticoded", 2); err != nil {
-			c.Logger.Error(err)
+			astilog.Error(err)
 			return
 		}
 	} else {
-		c.Logger.Error("Payload should be true")
+		astilog.Error("Payload should be true")
 	}
 	return
 }
