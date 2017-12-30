@@ -41,8 +41,8 @@ func NewClient(maxMessageSize int) *Client {
 }
 
 // Close closes the client properly
-func (c *Client) Close() {
-	astilog.Debugf("Closing astiws client %p", c)
+func (c *Client) Close() error {
+	astilog.Debugf("astiws: closing astiws client %p", c)
 	if c.conn != nil {
 		c.conn.Close()
 	}
@@ -50,6 +50,7 @@ func (c *Client) Close() {
 		close(c.channelStopPing)
 		c.channelStopPing = nil
 	}
+	return nil
 }
 
 // Dial dials an addr
@@ -60,7 +61,7 @@ func (c *Client) Dial(addr string) (err error) {
 	}
 
 	// Dial
-	astilog.Debugf("Dialing %s with client %p", addr, c)
+	astilog.Debugf("astiws: dialing %s with client %p", addr, c)
 	if c.conn, _, err = websocket.DefaultDialer.Dial(addr, nil); err != nil {
 		err = errors.Wrapf(err, "dialing %s failed", addr)
 		return
@@ -157,7 +158,7 @@ func (c *Client) Write(eventName string, payload interface{}) (err error) {
 
 	// Connection is not set
 	if c.conn == nil {
-		return fmt.Errorf("Connection is not set for astiws client %p", c)
+		return fmt.Errorf("astiws: connection is not set for astiws client %p", c)
 	}
 
 	// Marshal
@@ -168,8 +169,8 @@ func (c *Client) Write(eventName string, payload interface{}) (err error) {
 	}
 
 	// Write message
-	astilog.Debugf("Writing %s to astiws client %p", string(b), c)
-	if err = c.conn.WriteMessage(websocket.BinaryMessage, b); err != nil {
+	astilog.Debugf("astiws: writing %s to astiws client %p", string(b), c)
+	if err = c.conn.WriteMessage(websocket.TextMessage, b); err != nil {
 		err = errors.Wrap(err, "writing message failed")
 		return
 	}

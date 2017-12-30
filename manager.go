@@ -14,6 +14,7 @@ type ClientAdapter func(c *Client)
 
 // Manager represents a websocket manager
 type Manager struct {
+	counter  int
 	clients  map[interface{}]*Client
 	mutex    *sync.RWMutex
 	Upgrader websocket.Upgrader
@@ -31,6 +32,16 @@ func NewManager(maxMessageSize int) *Manager {
 	}
 }
 
+// AutoRegisterClient auto registers a new client
+func (m *Manager) AutoRegisterClient(c *Client) (k interface{}) {
+	m.mutex.Lock()
+	m.counter++
+	k = m.counter
+	m.mutex.Unlock()
+	m.RegisterClient(k, c)
+	return
+}
+
 // Client returns the client stored with the specific key
 func (m *Manager) Client(k interface{}) (c *Client, ok bool) {
 	m.mutex.RLock()
@@ -39,15 +50,16 @@ func (m *Manager) Client(k interface{}) (c *Client, ok bool) {
 	return
 }
 
-// Close closes the manager properly
-func (m *Manager) Close() {
+// Close implements the io.Closer interface
+func (m *Manager) Close() error {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
-	astilog.Debugf("Closing astiws manager %p", m)
+	astilog.Debugf("astiws: closing astiws manager %p", m)
 	for k, c := range m.clients {
 		c.Close()
 		delete(m.clients, k)
 	}
+	return nil
 }
 
 // CountClients returns the number of connected clients
@@ -57,11 +69,20 @@ func (m *Manager) CountClients() int {
 	return len(m.clients)
 }
 
+// Loop loops in clients and execute a function for each of them
+func (m *Manager) Loop(fn func(k interface{}, c *Client)) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	for k, c := range m.clients {
+		fn(k, c)
+	}
+}
+
 // RegisterClient registers a new client
 func (m *Manager) RegisterClient(k interface{}, c *Client) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
-	astilog.Debugf("Registering client %p in astiws manager %p with key %+v", c, m, k)
+	astilog.Debugf("astiws: registering client %p in astiws manager %p with key %+v", c, m, k)
 	m.clients[k] = c
 }
 
@@ -93,6 +114,6 @@ func (m *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request, a ClientAdap
 func (m *Manager) UnregisterClient(k interface{}) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
-	astilog.Debugf("Unregistering client in astiws manager %p with key %+v", m, k)
+	astilog.Debugf("astiws: unregistering client in astiws manager %p with key %+v", m, k)
 	delete(m.clients, k)
 }
