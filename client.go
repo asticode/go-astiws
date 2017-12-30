@@ -14,7 +14,7 @@ import (
 // Constants
 const (
 	EventNameDisconnect = "astiws.disconnect"
-	pingPeriod          = (pingWait * 9) / 10
+	PingPeriod          = (pingWait * 9) / 10
 	pingWait            = 60 * time.Second
 )
 
@@ -78,7 +78,7 @@ type BodyMessageRead struct {
 
 // ping writes a ping message in the connection
 func (c *Client) ping() {
-	var t = time.NewTicker(pingPeriod)
+	var t = time.NewTicker(PingPeriod)
 	defer t.Stop()
 	for {
 		select {
@@ -94,14 +94,19 @@ func (c *Client) ping() {
 	}
 }
 
+// HandlePing handles a ping
+func (c *Client) HandlePing() error {
+	return c.conn.SetReadDeadline(time.Now().Add(pingWait))
+}
+
 // Read reads from the client
 func (c *Client) Read() (err error) {
 	defer c.executeListeners(EventNameDisconnect, json.RawMessage{})
 
 	// Update conn
 	c.conn.SetReadLimit(int64(c.maxMessageSize))
-	c.conn.SetReadDeadline(time.Now().Add(pingWait))
-	c.conn.SetPingHandler(func(string) error { c.conn.SetReadDeadline(time.Now().Add(pingWait)); return nil })
+	c.HandlePing()
+	c.conn.SetPingHandler(func(string) error { return c.HandlePing() })
 
 	// Ping
 	go c.ping()
