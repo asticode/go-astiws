@@ -92,7 +92,6 @@ func (m *Manager) RegisterClient(k interface{}, c *Client) {
 func (m *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request, a ClientAdapter) (err error) {
 	// Init client
 	var c = NewClient(m.Upgrader.WriteBufferSize)
-	defer c.Close()
 	if c.conn, err = m.Upgrader.Upgrade(w, r, nil); err != nil {
 		err = errors.Wrap(err, "upgrading conn failed")
 		return

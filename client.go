@@ -3,10 +3,9 @@ package astiws
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"sync"
 	"time"
-
-	"net/http"
 
 	"github.com/asticode/go-astilog"
 	"github.com/gorilla/websocket"
@@ -25,34 +24,46 @@ type ListenerFunc func(c *Client, eventName string, payload json.RawMessage) err
 
 // Client represents a hub client
 type Client struct {
-	channelStopPing chan bool
-	conn            *websocket.Conn
-	listeners       map[string][]ListenerFunc
-	maxMessageSize  int
-	mutex           *sync.RWMutex
+	chanDone       chan bool
+	chanStopPing   chan bool
+	conn           *websocket.Conn
+	listeners      map[string][]ListenerFunc
+	maxMessageSize int
+	mutex          *sync.RWMutex
 }
 
 // NewClient creates a new client
 func NewClient(maxMessageSize int) *Client {
 	return &Client{
-		channelStopPing: make(chan bool),
-		listeners:       make(map[string][]ListenerFunc),
-		maxMessageSize:  maxMessageSize,
-		mutex:           &sync.RWMutex{},
+		chanStopPing:   make(chan bool),
+		listeners:      make(map[string][]ListenerFunc),
+		maxMessageSize: maxMessageSize,
+		mutex:          &sync.RWMutex{},
 	}
 }
 
 // Close closes the client properly
-func (c *Client) Close() error {
+func (c *Client) Close() (err error) {
 	astilog.Debugf("astiws: closing astiws client %p", c)
 	if c.conn != nil {
+		// Send a close frame and wait for the server to respond.
+		astilog.Debug("astiws: sending close frame")
+		if err = c.conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "")); err != nil {
+			err = errors.Wrap(err, "astiws: sending close frame failed")
+			return
+		}
+		if c.chanDone != nil {
+			<-c.chanDone
+			c.chanDone = nil
+		}
 		c.conn.Close()
+		c.conn = nil
 	}
-	if c.channelStopPing != nil {
-		close(c.channelStopPing)
-		c.channelStopPing = nil
+	if c.chanStopPing != nil {
+		close(c.chanStopPing)
+		c.chanStopPing = nil
 	}
-	return nil
+	return
 }
 
 // Dial dials an addr
@@ -89,7 +100,7 @@ func (c *Client) ping() {
 	defer t.Stop()
 	for {
 		select {
-		case <-c.channelStopPing:
+		case <-c.chanStopPing:
 			return
 		case <-t.C:
 			c.mutex.Lock()
@@ -108,7 +119,12 @@ func (c *Client) HandlePing() error {
 
 // Read reads from the client
 func (c *Client) Read() (err error) {
-	defer c.executeListeners(EventNameDisconnect, json.RawMessage{})
+	// Handle close
+	c.chanDone = make(chan bool)
+	defer func() {
+		close(c.chanDone)
+		c.executeListeners(EventNameDisconnect, json.RawMessage{})
+	}()
 
 	// Update conn
 	c.conn.SetReadLimit(int64(c.maxMessageSize))
@@ -123,9 +139,6 @@ func (c *Client) Read() (err error) {
 		// Read message
 		var m []byte
 		if _, m, err = c.conn.ReadMessage(); err != nil {
-			// We need to close the connection here since we want the client to know the connection is not
-			// usable anymore for writing
-			c.conn.Close()
 			err = errors.Wrap(err, "reading message failed")
 			return
 		}
