@@ -14,7 +14,6 @@ type ClientAdapter func(c *Client)
 
 // Manager represents a websocket manager
 type Manager struct {
-	counter  int
 	clients  map[interface{}]*Client
 	mutex    *sync.RWMutex
 	Upgrader websocket.Upgrader
@@ -33,12 +32,8 @@ func NewManager(maxMessageSize int) *Manager {
 }
 
 // AutoRegisterClient auto registers a new client
-func (m *Manager) AutoRegisterClient(c *Client) (k interface{}) {
-	m.mutex.Lock()
-	m.counter++
-	k = m.counter
-	m.mutex.Unlock()
-	m.RegisterClient(k, c)
+func (m *Manager) AutoRegisterClient(c *Client) {
+	m.RegisterClient(c, c)
 	return
 }
 

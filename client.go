@@ -16,7 +16,7 @@ import (
 const (
 	EventNameDisconnect = "astiws.disconnect"
 	PingPeriod          = (pingWait * 9) / 10
-	pingWait            = 60 * time.Second
+	pingWait            = 5 * time.Second
 )
 
 // ListenerFunc represents a listener callback
@@ -25,7 +25,6 @@ type ListenerFunc func(c *Client, eventName string, payload json.RawMessage) err
 // Client represents a hub client
 type Client struct {
 	chanDone       chan bool
-	chanStopPing   chan bool
 	conn           *websocket.Conn
 	listeners      map[string][]ListenerFunc
 	maxMessageSize int
@@ -35,7 +34,6 @@ type Client struct {
 // NewClient creates a new client
 func NewClient(maxMessageSize int) *Client {
 	return &Client{
-		chanStopPing:   make(chan bool),
 		listeners:      make(map[string][]ListenerFunc),
 		maxMessageSize: maxMessageSize,
 		mutex:          &sync.RWMutex{},
@@ -56,12 +54,6 @@ func (c *Client) Close() (err error) {
 			<-c.chanDone
 			c.chanDone = nil
 		}
-		c.conn.Close()
-		c.conn = nil
-	}
-	if c.chanStopPing != nil {
-		close(c.chanStopPing)
-		c.chanStopPing = nil
 	}
 	return
 }
@@ -95,12 +87,12 @@ type BodyMessageRead struct {
 }
 
 // ping writes a ping message in the connection
-func (c *Client) ping() {
+func (c *Client) ping(chanStop chan bool) {
 	var t = time.NewTicker(PingPeriod)
 	defer t.Stop()
 	for {
 		select {
-		case <-c.chanStopPing:
+		case <-chanStop:
 			return
 		case <-t.C:
 			c.mutex.Lock()
@@ -120,9 +112,13 @@ func (c *Client) HandlePing() error {
 // Read reads from the client
 func (c *Client) Read() (err error) {
 	// Handle close
+	chanStopPing := make(chan bool)
 	c.chanDone = make(chan bool)
 	defer func() {
 		close(c.chanDone)
+		close(chanStopPing)
+		c.conn.Close()
+		c.conn = nil
 		c.executeListeners(EventNameDisconnect, json.RawMessage{})
 	}()
 
@@ -132,7 +128,7 @@ func (c *Client) Read() (err error) {
 	c.conn.SetPingHandler(func(string) error { return c.HandlePing() })
 
 	// Ping
-	go c.ping()
+	go c.ping(chanStopPing)
 
 	// Loop
 	for {
