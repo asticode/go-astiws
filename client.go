@@ -6,6 +6,8 @@ import (
 	"sync"
 	"time"
 
+	"net/http"
+
 	"github.com/asticode/go-astilog"
 	"github.com/gorilla/websocket"
 	"github.com/pkg/errors"
@@ -54,7 +56,12 @@ func (c *Client) Close() error {
 }
 
 // Dial dials an addr
-func (c *Client) Dial(addr string) (err error) {
+func (c *Client) Dial(addr string) error {
+	return c.DialWithHeaders(addr, nil)
+}
+
+// DialWithHeader dials an addr with specific headers
+func (c *Client) DialWithHeaders(addr string, h http.Header) (err error) {
 	// Make sure previous connections is closed
 	if c.conn != nil {
 		c.conn.Close()
@@ -62,7 +69,7 @@ func (c *Client) Dial(addr string) (err error) {
 
 	// Dial
 	astilog.Debugf("astiws: dialing %s with client %p", addr, c)
-	if c.conn, _, err = websocket.DefaultDialer.Dial(addr, nil); err != nil {
+	if c.conn, _, err = websocket.DefaultDialer.Dial(addr, h); err != nil {
 		err = errors.Wrapf(err, "dialing %s failed", addr)
 		return
 	}
