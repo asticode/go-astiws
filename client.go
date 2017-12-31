@@ -16,7 +16,7 @@ import (
 const (
 	EventNameDisconnect = "astiws.disconnect"
 	PingPeriod          = (pingWait * 9) / 10
-	pingWait            = 5 * time.Second
+	pingWait            = 60 * time.Second
 )
 
 // ListenerFunc represents a listener callback
