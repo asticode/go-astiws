@@ -45,6 +45,17 @@ func (m *Manager) Client(k interface{}) (c *Client, ok bool) {
 	return
 }
 
+// Clients executes a function on every client. It stops if an error is returned.
+func (m *Manager) Clients(fn func(k interface{}, c *Client) error) {
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
+	for k, c := range m.clients {
+		if err := fn(k, c); err != nil {
+			return
+		}
+	}
+}
+
 // Close implements the io.Closer interface
 func (m *Manager) Close() error {
 	m.mutex.RLock()

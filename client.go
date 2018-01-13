@@ -205,6 +205,13 @@ func (c *Client) AddListener(eventName string, f ListenerFunc) {
 	c.listeners[eventName] = append(c.listeners[eventName], f)
 }
 
+// DelListener deletes a listener
+func (c *Client) DelListener(eventName string) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	delete(c.listeners, eventName)
+}
+
 // SetListener sets a listener
 func (c *Client) SetListener(eventName string, f ListenerFunc) {
 	c.mutex.Lock()
