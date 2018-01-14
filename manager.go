@@ -19,14 +19,19 @@ type Manager struct {
 	Upgrader websocket.Upgrader
 }
 
+// ManagerConfiguration represents a manager configuration
+type ManagerConfiguration struct {
+	MaxMessageSize int `toml:"max_message_size"`
+}
+
 // NewManager creates a new manager
-func NewManager(maxMessageSize int) *Manager {
+func NewManager(c ManagerConfiguration) *Manager {
 	return &Manager{
 		clients: make(map[interface{}]*Client),
 		mutex:   &sync.RWMutex{},
 		Upgrader: websocket.Upgrader{
-			ReadBufferSize:  maxMessageSize,
-			WriteBufferSize: maxMessageSize,
+			ReadBufferSize:  c.MaxMessageSize,
+			WriteBufferSize: c.MaxMessageSize,
 		},
 	}
 }
