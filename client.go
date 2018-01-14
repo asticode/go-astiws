@@ -24,19 +24,24 @@ type ListenerFunc func(c *Client, eventName string, payload json.RawMessage) err
 
 // Client represents a hub client
 type Client struct {
-	chanDone       chan bool
-	conn           *websocket.Conn
-	listeners      map[string][]ListenerFunc
-	maxMessageSize int
-	mutex          *sync.RWMutex
+	c         ClientConfiguration
+	chanDone  chan bool
+	conn      *websocket.Conn
+	listeners map[string][]ListenerFunc
+	mutex     *sync.RWMutex
+}
+
+// ClientConfiguration represents a client configuration
+type ClientConfiguration struct {
+	MaxMessageSize int `toml:"max_message_size"`
 }
 
 // NewClient creates a new client
-func NewClient(maxMessageSize int) *Client {
+func NewClient(c ClientConfiguration) *Client {
 	return &Client{
-		listeners:      make(map[string][]ListenerFunc),
-		maxMessageSize: maxMessageSize,
-		mutex:          &sync.RWMutex{},
+		c:         c,
+		listeners: make(map[string][]ListenerFunc),
+		mutex:     &sync.RWMutex{},
 	}
 }
 
@@ -123,7 +128,9 @@ func (c *Client) Read() (err error) {
 	}()
 
 	// Update conn
-	c.conn.SetReadLimit(int64(c.maxMessageSize))
+	if c.c.MaxMessageSize > 0 {
+		c.conn.SetReadLimit(int64(c.c.MaxMessageSize))
+	}
 	c.HandlePing()
 	c.conn.SetPingHandler(func(string) error { return c.HandlePing() })
 
