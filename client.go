@@ -197,7 +197,6 @@ func (c *Client) Write(eventName string, payload interface{}) (err error) {
 	}
 
 	// Write message
-	astilog.Debugf("astiws: writing %s to astiws client %p", eventName, c)
 	if err = c.conn.WriteMessage(websocket.TextMessage, b); err != nil {
 		err = errors.Wrap(err, "writing message failed")
 		return
