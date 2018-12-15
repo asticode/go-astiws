@@ -31,7 +31,7 @@ func main() {
 		wg.Add(1)
 		go func(i int) {
 			// Init client
-			var c = astiws.NewClient(1024)
+			var c = astiws.NewClient(astiws.ClientConfiguration{MaxMessageSize: 1024})
 			defer c.Close()
 
 			// Set up listeners

@@ -28,7 +28,7 @@ func main() {
 	astilog.FlagInit()
 
 	// Init manager
-	var m = astiws.NewManager(1024)
+	var m = astiws.NewManager(astiws.ManagerConfiguration{MaxMessageSize: 1024})
 	defer m.Close()
 
 	// Init router
