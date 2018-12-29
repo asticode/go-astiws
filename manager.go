@@ -108,7 +108,7 @@ func (m *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request, a ClientAdap
 		MaxMessageSize: m.Upgrader.WriteBufferSize,
 	})
 	if c.conn, err = m.Upgrader.Upgrade(w, r, nil); err != nil {
-		err = errors.Wrap(err, "upgrading conn failed")
+		err = errors.Wrap(err, "astiws: upgrading conn failed")
 		return
 	}
 
@@ -116,8 +116,8 @@ func (m *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request, a ClientAdap
 	a(c)
 
 	// Read
-	if err = c.Read(); err != nil {
-		err = errors.Wrap(err, "reading failed")
+	if err = c.read(c.handlePingManager); err != nil {
+		err = errors.Wrap(err, "astiws: reading failed")
 		return
 	}
 	return

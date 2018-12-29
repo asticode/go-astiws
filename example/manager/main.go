@@ -48,7 +48,7 @@ func Handle(rw http.ResponseWriter, r *http.Request, p httprouter.Params) {
 	var m = ManagerFromContext(r.Context())
 
 	// Serve
-	if err := m.ServeHTTP(rw, r, AdaptClient); err != nil {
+	if err := m.ServeHTTP(rw, r, AdaptClient(m)); err != nil {
 		astilog.Error(err)
 		return
 	}
@@ -77,9 +77,14 @@ func ManagerFromContext(ctx context.Context) *astiws.Manager {
 }
 
 // AdaptClient adapts a client
-func AdaptClient(c *astiws.Client) {
-	// Set up listeners
-	c.SetListener("asticode", HandleAsticode)
+func AdaptClient(m *astiws.Manager) func(c *astiws.Client) {
+	return func(c *astiws.Client) {
+		// Auto register client
+		m.AutoRegisterClient(c)
+
+		// Set up listeners
+		c.SetListener("asticode", HandleAsticode)
+	}
 }
 
 // HandleAsticode handles asticode events
