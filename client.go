@@ -28,7 +28,8 @@ type Client struct {
 	c         ClientConfiguration
 	conn      *websocket.Conn
 	listeners map[string][]ListenerFunc
-	m         *sync.Mutex // Lock listeners
+	ml        *sync.Mutex // Lock listeners
+	mw        *sync.Mutex // Lock write to avoid panics "concurrent write to websocket connection"
 	wg        *sync.WaitGroup
 }
 
@@ -55,7 +56,8 @@ func NewClient(c ClientConfiguration) *Client {
 	return &Client{
 		c:         c,
 		listeners: make(map[string][]ListenerFunc),
-		m:         &sync.Mutex{},
+		ml:        &sync.Mutex{},
+		mw:        &sync.Mutex{},
 		wg:        &sync.WaitGroup{},
 	}
 }
@@ -69,7 +71,7 @@ func (c *Client) Close() (err error) {
 	if c.conn != nil {
 		// Send a close frame
 		astilog.Debug("astiws: sending close frame")
-		if err = c.conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "")); err != nil {
+		if err = c.write(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "")); err != nil {
 			err = errors.Wrap(err, "astiws: sending close frame failed")
 			return
 		}
@@ -180,7 +182,7 @@ func (c *Client) ping(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			if err := c.conn.WriteMessage(websocket.PingMessage, []byte{}); err != nil {
+			if err := c.write(websocket.PingMessage, []byte{}); err != nil {
 				astilog.Error(errors.Wrap(err, "astiws: sending ping message failed"))
 			}
 		}
@@ -197,7 +199,7 @@ func (c *Client) handlePingManager(ctx context.Context) {
 		}
 
 		// Send pong
-		if err = c.conn.WriteMessage(websocket.PongMessage, []byte{}); err != nil {
+		if err = c.write(websocket.PongMessage, []byte{}); err != nil {
 			err = errors.Wrap(err, "astiws: sending pong message failed")
 			return
 		}
@@ -213,9 +215,9 @@ func (c *Client) ExtendConnection() error {
 // executeListeners executes listeners for a specific event
 func (c *Client) executeListeners(eventName string, payload json.RawMessage) (err error) {
 	// Get listeners
-	c.m.Lock()
+	c.ml.Lock()
 	fs, ok := c.listeners[eventName]
-	c.m.Unlock()
+	c.ml.Unlock()
 
 	// No listeners
 	if !ok {
@@ -247,30 +249,36 @@ func (c *Client) Write(eventName string, payload interface{}) (err error) {
 	}
 
 	// Write message
-	if err = c.conn.WriteMessage(websocket.TextMessage, b); err != nil {
+	if err = c.write(websocket.TextMessage, b); err != nil {
 		err = errors.Wrap(err, "astiws: writing message failed")
 		return
 	}
 	return
 }
 
+func (c *Client) write(messageType int, data []byte) error {
+	c.mw.Lock()
+	defer c.mw.Unlock()
+	return c.conn.WriteMessage(messageType, data)
+}
+
 // AddListener adds a listener
 func (c *Client) AddListener(eventName string, f ListenerFunc) {
-	c.m.Lock()
-	defer c.m.Unlock()
+	c.ml.Lock()
+	defer c.ml.Unlock()
 	c.listeners[eventName] = append(c.listeners[eventName], f)
 }
 
 // DelListener deletes a listener
 func (c *Client) DelListener(eventName string) {
-	c.m.Lock()
-	defer c.m.Unlock()
+	c.ml.Lock()
+	defer c.ml.Unlock()
 	delete(c.listeners, eventName)
 }
 
 // SetListener sets a listener
 func (c *Client) SetListener(eventName string, f ListenerFunc) {
-	c.m.Lock()
-	defer c.m.Unlock()
+	c.ml.Lock()
+	defer c.ml.Unlock()
 	c.listeners[eventName] = []ListenerFunc{f}
 }
