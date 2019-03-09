@@ -148,14 +148,14 @@ func (c *Client) read(handlePing func(ctx context.Context)) (err error) {
 		// Unmarshal
 		var b BodyMessageRead
 		if err = json.Unmarshal(m, &b); err != nil {
-			err = errors.Wrap(err, "astiws: unmarshaling message failed")
-			return
+			astilog.Error(errors.Wrap(err, "astiws: unmarshaling message failed"))
+			continue
 		}
 
 		// Execute listener callbacks
 		if err = c.executeListeners(b.EventName, b.Payload); err != nil {
-			err = errors.Wrap(err, "astiws: executing listeners failed")
-			return
+			astilog.Error(errors.Wrap(err, "astiws: executing listeners failed"))
+			continue
 		}
 	}
 	return
