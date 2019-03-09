@@ -44,6 +44,12 @@ func (m *Manager) AutoRegisterClient(c *Client) {
 	return
 }
 
+// AutoUnregisterClient auto unregisters a client
+func (m *Manager) AutoUnregisterClient(c *Client) {
+	m.UnregisterClient(c)
+	return
+}
+
 // Client returns the client stored with the specific key
 func (m *Manager) Client(k interface{}) (c *Client, ok bool) {
 	m.mutex.RLock()
