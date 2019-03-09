@@ -153,7 +153,10 @@ func (c *Client) read(handlePing func(ctx context.Context)) (err error) {
 		}
 
 		// Execute listener callbacks
-		c.executeListeners(b.EventName, b.Payload)
+		if err = c.executeListeners(b.EventName, b.Payload); err != nil {
+			err = errors.Wrap(err, "astiws: executing listeners failed")
+			return
+		}
 	}
 	return
 }
