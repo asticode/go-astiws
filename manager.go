@@ -10,7 +10,7 @@ import (
 )
 
 // ClientAdapter represents a client adapter func
-type ClientAdapter func(c *Client)
+type ClientAdapter func(c *Client) error
 
 // Manager represents a websocket manager
 type Manager struct {
@@ -109,17 +109,22 @@ func (m *Manager) RegisterClient(k interface{}, c *Client) {
 // We don't want to register the client yet, since we may want to index the map of clients with an information we don't
 // have yet
 func (m *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request, a ClientAdapter) (err error) {
-	// Init client
-	var c = NewClient(ClientConfiguration{
+	// Create client
+	var c = NewClientWithContext(r.Context(), ClientConfiguration{
 		MaxMessageSize: m.Upgrader.WriteBufferSize,
 	})
+
+	// Upgrade connection
 	if c.conn, err = m.Upgrader.Upgrade(w, r, nil); err != nil {
 		err = errors.Wrap(err, "astiws: upgrading conn failed")
 		return
 	}
 
 	// Adapt client
-	a(c)
+	if err = a(c); err != nil {
+		err = errors.Wrap(err, "astiws: adapting client failed")
+		return
+	}
 
 	// Read
 	if err = c.read(c.handlePingManager); err != nil {

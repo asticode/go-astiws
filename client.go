@@ -27,6 +27,7 @@ type ListenerFunc func(c *Client, eventName string, payload json.RawMessage) err
 type Client struct {
 	c         ClientConfiguration
 	conn      *websocket.Conn
+	ctx       context.Context
 	listeners map[string][]ListenerFunc
 	ml        *sync.Mutex // Lock listeners
 	mw        *sync.Mutex // Lock write to avoid panics "concurrent write to websocket connection"
@@ -53,8 +54,14 @@ type BodyMessageRead struct {
 
 // NewClient creates a new client
 func NewClient(c ClientConfiguration) *Client {
+	return NewClientWithContext(context.Background(), c)
+}
+
+// NewClientWithContext creates a new client with a context
+func NewClientWithContext(ctx context.Context, c ClientConfiguration) *Client {
 	return &Client{
 		c:         c,
+		ctx:       ctx,
 		listeners: make(map[string][]ListenerFunc),
 		ml:        &sync.Mutex{},
 		mw:        &sync.Mutex{},
@@ -62,15 +69,26 @@ func NewClient(c ClientConfiguration) *Client {
 	}
 }
 
+// Context return the client's context
+func (c *Client) Context() context.Context {
+	return c.ctx
+}
+
+// WithContext updates the client's context
+func (c *Client) WithContext(ctx context.Context) *Client {
+	c.ctx = ctx
+	return c
+}
+
 // Close closes the client properly
 func (c *Client) Close() (err error) {
 	// Log
-	astilog.Debugf("astiws: closing astiws client %p", c)
+	astilog.DebugCf(c.ctx, "astiws: closing astiws client %p", c)
 
 	// There's a connection to close
 	if c.conn != nil {
 		// Send a close frame
-		astilog.Debug("astiws: sending close frame")
+		astilog.DebugCf(c.ctx, "astiws: sending close frame")
 		if err = c.write(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "")); err != nil {
 			err = errors.Wrap(err, "astiws: sending close frame failed")
 			return
@@ -95,7 +113,7 @@ func (c *Client) DialWithHeaders(addr string, h http.Header) (err error) {
 	}
 
 	// Dial
-	astilog.Debugf("astiws: dialing %s with client %p", addr, c)
+	astilog.DebugCf(c.ctx, "astiws: dialing %s with client %p", addr, c)
 	if c.conn, _, err = websocket.DefaultDialer.Dial(addr, h); err != nil {
 		err = errors.Wrapf(err, "astiws: dialing %s failed", addr)
 		return
@@ -148,15 +166,12 @@ func (c *Client) read(handlePing func(ctx context.Context)) (err error) {
 		// Unmarshal
 		var b BodyMessageRead
 		if err = json.Unmarshal(m, &b); err != nil {
-			astilog.Error(errors.Wrap(err, "astiws: unmarshaling message failed"))
+			astilog.ErrorC(c.ctx, errors.Wrap(err, "astiws: unmarshaling message failed"))
 			continue
 		}
 
 		// Execute listener callbacks
-		if err = c.executeListeners(b.EventName, b.Payload); err != nil {
-			astilog.Error(errors.Wrap(err, "astiws: executing listeners failed"))
-			continue
-		}
+		c.executeListeners(b.EventName, b.Payload)
 	}
 	return
 }
@@ -186,7 +201,7 @@ func (c *Client) ping(ctx context.Context) {
 			return
 		case <-t.C:
 			if err := c.write(websocket.PingMessage, []byte{}); err != nil {
-				astilog.Error(errors.Wrap(err, "astiws: sending ping message failed"))
+				astilog.ErrorC(c.ctx, errors.Wrap(err, "astiws: sending ping message failed"))
 			}
 		}
 	}
@@ -216,7 +231,7 @@ func (c *Client) ExtendConnection() error {
 }
 
 // executeListeners executes listeners for a specific event
-func (c *Client) executeListeners(eventName string, payload json.RawMessage) (err error) {
+func (c *Client) executeListeners(eventName string, payload json.RawMessage) {
 	// Get listeners
 	c.ml.Lock()
 	fs, ok := c.listeners[eventName]
@@ -229,9 +244,10 @@ func (c *Client) executeListeners(eventName string, payload json.RawMessage) (er
 
 	// Loop through listeners
 	for _, f := range fs {
-		if err = f(c, eventName, payload); err != nil {
-			err = errors.Wrapf(err, "astiws: executing listener for event %s failed", eventName)
-			return
+		// Execute listener
+		if err := f(c, eventName, payload); err != nil {
+			astilog.ErrorC(c.ctx, errors.Wrapf(err, "astiws: executing listener for event %s failed", eventName))
+			continue
 		}
 	}
 	return
@@ -241,7 +257,8 @@ func (c *Client) executeListeners(eventName string, payload json.RawMessage) (er
 func (c *Client) Write(eventName string, payload interface{}) (err error) {
 	// Connection is not set
 	if c.conn == nil {
-		return fmt.Errorf("astiws: connection is not set for astiws client %p", c)
+		err = fmt.Errorf("astiws: connection is not set for astiws client %p", c)
+		return
 	}
 
 	// Marshal
