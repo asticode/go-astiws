@@ -23,12 +23,16 @@ const (
 // ListenerFunc represents a listener callback
 type ListenerFunc func(c *Client, eventName string, payload json.RawMessage) error
 
-// Client represents a hub client
+// MessageHandler represents a message handler
+type MessageHandler func(m []byte) error
+
+// Client represents a websocket client
 type Client struct {
 	c         ClientConfiguration
 	conn      *websocket.Conn
 	ctx       context.Context
 	listeners map[string][]ListenerFunc
+	mh        MessageHandler
 	ml        *sync.Mutex // Lock listeners
 	mw        *sync.Mutex // Lock write to avoid panics "concurrent write to websocket connection"
 	wg        *sync.WaitGroup
@@ -58,15 +62,17 @@ func NewClient(c ClientConfiguration) *Client {
 }
 
 // NewClientWithContext creates a new client with a context
-func NewClientWithContext(ctx context.Context, c ClientConfiguration) *Client {
-	return &Client{
-		c:         c,
+func NewClientWithContext(ctx context.Context, cfg ClientConfiguration) (c *Client) {
+	c = &Client{
+		c:         cfg,
 		ctx:       ctx,
 		listeners: make(map[string][]ListenerFunc),
 		ml:        &sync.Mutex{},
 		mw:        &sync.Mutex{},
 		wg:        &sync.WaitGroup{},
 	}
+	c.SetMessageHandler(c.defaultMessageHandler)
+	return
 }
 
 // Context return the client's context
@@ -163,15 +169,11 @@ func (c *Client) read(handlePing func(ctx context.Context)) (err error) {
 			return
 		}
 
-		// Unmarshal
-		var b BodyMessageRead
-		if err = json.Unmarshal(m, &b); err != nil {
-			astilog.ErrorC(c.ctx, errors.Wrap(err, "astiws: unmarshaling message failed"))
+		// Handle message
+		if err = c.mh(m); err != nil {
+			astilog.ErrorC(c.ctx, errors.Wrap(err, "astiws: handling message failed"))
 			continue
 		}
-
-		// Execute listener callbacks
-		c.executeListeners(b.EventName, b.Payload)
 	}
 	return
 }
@@ -200,7 +202,7 @@ func (c *Client) ping(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			if err := c.write(websocket.PingMessage, []byte{}); err != nil {
+			if err := c.write(websocket.PingMessage, nil); err != nil {
 				astilog.ErrorC(c.ctx, errors.Wrap(err, "astiws: sending ping message failed"))
 			}
 		}
@@ -217,7 +219,7 @@ func (c *Client) handlePingManager(ctx context.Context) {
 		}
 
 		// Send pong
-		if err = c.write(websocket.PongMessage, []byte{}); err != nil {
+		if err = c.write(websocket.PongMessage, nil); err != nil {
 			err = errors.Wrap(err, "astiws: sending pong message failed")
 			return
 		}
@@ -254,29 +256,45 @@ func (c *Client) executeListeners(eventName string, payload json.RawMessage) {
 }
 
 // Write writes a message to the client
-func (c *Client) Write(eventName string, payload interface{}) (err error) {
-	// Connection is not set
-	if c.conn == nil {
-		err = fmt.Errorf("astiws: connection is not set for astiws client %p", c)
-		return
-	}
+func (c *Client) Write(eventName string, payload interface{}) error {
+	return c.WriteJSON(BodyMessage{EventName: eventName, Payload: payload})
+}
 
+// WriteJSON writes a JSON message to the client
+func (c *Client) WriteJSON(m interface{}) (err error) {
 	// Marshal
 	var b []byte
-	if b, err = json.Marshal(BodyMessage{EventName: eventName, Payload: payload}); err != nil {
+	if b, err = json.Marshal(m); err != nil {
 		err = errors.Wrap(err, "astiws: marshaling message failed")
 		return
 	}
 
+	// Write text message
+	if err = c.WriteText(b); err != nil {
+		err = errors.Wrap(err, "astiws: writing text message failed")
+		return
+	}
+	return
+}
+
+// WriteText writes a text message to the client
+func (c *Client) WriteText(m []byte) (err error) {
 	// Write message
-	if err = c.write(websocket.TextMessage, b); err != nil {
+	if err = c.write(websocket.TextMessage, m); err != nil {
 		err = errors.Wrap(err, "astiws: writing message failed")
 		return
 	}
 	return
 }
 
-func (c *Client) write(messageType int, data []byte) error {
+func (c *Client) write(messageType int, data []byte) (err error) {
+	// Connection is not set
+	if c.conn == nil {
+		err = fmt.Errorf("astiws: connection is not set for astiws client %p", c)
+		return
+	}
+
+	// Write
 	c.mw.Lock()
 	defer c.mw.Unlock()
 	return c.conn.WriteMessage(messageType, data)
@@ -301,4 +319,22 @@ func (c *Client) SetListener(eventName string, f ListenerFunc) {
 	c.ml.Lock()
 	defer c.ml.Unlock()
 	c.listeners[eventName] = []ListenerFunc{f}
+}
+
+// SetMessageHandler sets the message handler
+func (c *Client) SetMessageHandler(h MessageHandler) {
+	c.mh = h
+}
+
+func (c *Client) defaultMessageHandler(m []byte) (err error) {
+	// Unmarshal
+	var b BodyMessageRead
+	if err = json.Unmarshal(m, &b); err != nil {
+		err = errors.Wrap(err, "astiws: unmarshaling message failed")
+		return
+	}
+
+	// Execute listener callbacks
+	c.executeListeners(b.EventName, b.Payload)
+	return
 }
