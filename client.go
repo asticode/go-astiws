@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/asticode/go-astikit"
 	"github.com/asticode/go-astilog"
 	"github.com/gorilla/websocket"
 	"github.com/pkg/errors"
@@ -175,7 +176,6 @@ func (c *Client) read(handlePing func(ctx context.Context)) (err error) {
 			continue
 		}
 	}
-	return
 }
 
 func (c *Client) handlePingClient(ctx context.Context) {
@@ -252,7 +252,6 @@ func (c *Client) executeListeners(eventName string, payload json.RawMessage) {
 			continue
 		}
 	}
-	return
 }
 
 // Write writes a message to the client
@@ -337,4 +336,62 @@ func (c *Client) defaultMessageHandler(m []byte) (err error) {
 	// Execute listener callbacks
 	c.executeListeners(b.EventName, b.Payload)
 	return
+}
+
+// DialAndReadOptions represents dial and read options
+type DialAndReadOptions struct {
+	Addr        string
+	Header      http.Header
+	OnDial      func() error
+	OnReadError func(err error)
+}
+
+// DialAndReadOptions dials and read with options
+// It's the responsibility of the caller to close the Client
+func (c *Client) DialAndRead(w *astikit.Worker, o DialAndReadOptions) {
+	// Execute in a task
+	w.NewTask().Do(func() {
+		// Dial
+		go func() {
+			const sleepError = 5 * time.Second
+			for {
+				// Check context error
+				if w.Context().Err() != nil {
+					break
+				}
+
+				// Dial
+				w.Logger().Infof("astiws: dialing %s", o.Addr)
+				if err := c.DialWithHeaders(o.Addr, o.Header); err != nil {
+					w.Logger().Error(errors.Wrapf(err, "astiws: dialing %s failed", o.Addr))
+					time.Sleep(sleepError)
+					continue
+				}
+
+				// Custom callback
+				if o.OnDial != nil {
+					if err := o.OnDial(); err != nil {
+						w.Logger().Error(errors.Wrapf(err, "astiws: custom on dial callback on %s failed", o.Addr))
+						time.Sleep(sleepError)
+						continue
+					}
+				}
+
+				// Read
+				if err := c.Read(); err != nil {
+					if o.OnReadError != nil {
+						o.OnReadError(err)
+					} else {
+						w.Logger().Error(errors.Wrapf(err, "astiws: reading on %s failed", o.Addr))
+					}
+					time.Sleep(sleepError)
+					continue
+				}
+			}
+		}()
+
+		// Wait for context to be done
+		<-w.Context().Done()
+	})
+
 }

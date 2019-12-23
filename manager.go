@@ -41,13 +41,11 @@ func NewManager(c ManagerConfiguration) *Manager {
 // AutoRegisterClient auto registers a new client
 func (m *Manager) AutoRegisterClient(c *Client) {
 	m.RegisterClient(c, c)
-	return
 }
 
 // AutoUnregisterClient auto unregisters a client
 func (m *Manager) AutoUnregisterClient(c *Client) {
 	m.UnregisterClient(c)
-	return
 }
 
 // Client returns the client stored with the specific key
