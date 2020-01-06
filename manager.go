@@ -1,12 +1,12 @@
 package astiws
 
 import (
+	"fmt"
 	"net/http"
 	"sync"
 
-	"github.com/asticode/go-astilog"
+	"github.com/asticode/go-astikit"
 	"github.com/gorilla/websocket"
-	"github.com/pkg/errors"
 )
 
 // ClientAdapter represents a client adapter func
@@ -15,6 +15,7 @@ type ClientAdapter func(c *Client) error
 // Manager represents a websocket manager
 type Manager struct {
 	clients  map[interface{}]*Client
+	l        astikit.CompleteLogger
 	mutex    *sync.RWMutex
 	Upgrader websocket.Upgrader
 }
@@ -26,9 +27,10 @@ type ManagerConfiguration struct {
 }
 
 // NewManager creates a new manager
-func NewManager(c ManagerConfiguration) *Manager {
+func NewManager(c ManagerConfiguration, l astikit.StdLogger) *Manager {
 	return &Manager{
 		clients: make(map[interface{}]*Client),
+		l:       astikit.AdaptStdLogger(l),
 		mutex:   &sync.RWMutex{},
 		Upgrader: websocket.Upgrader{
 			CheckOrigin:     c.CheckOrigin,
@@ -71,7 +73,7 @@ func (m *Manager) Clients(fn func(k interface{}, c *Client) error) {
 func (m *Manager) Close() error {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
-	astilog.Debugf("astiws: closing astiws manager %p", m)
+	m.l.Debugf("astiws: closing astiws manager %p", m)
 	for k, c := range m.clients {
 		c.Close()
 		delete(m.clients, k)
@@ -99,7 +101,7 @@ func (m *Manager) Loop(fn func(k interface{}, c *Client)) {
 func (m *Manager) RegisterClient(k interface{}, c *Client) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
-	astilog.Debugf("astiws: registering client %p in astiws manager %p with key %+v", c, m, k)
+	m.l.Debugf("astiws: registering client %p in astiws manager %p with key %+v", c, m, k)
 	m.clients[k] = c
 }
 
@@ -110,23 +112,23 @@ func (m *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request, a ClientAdap
 	// Create client
 	var c = NewClientWithContext(r.Context(), ClientConfiguration{
 		MaxMessageSize: m.Upgrader.WriteBufferSize,
-	})
+	}, m.l)
 
 	// Upgrade connection
 	if c.conn, err = m.Upgrader.Upgrade(w, r, nil); err != nil {
-		err = errors.Wrap(err, "astiws: upgrading conn failed")
+		err = fmt.Errorf("astiws: upgrading conn failed: %w", err)
 		return
 	}
 
 	// Adapt client
 	if err = a(c); err != nil {
-		err = errors.Wrap(err, "astiws: adapting client failed")
+		err = fmt.Errorf("astiws: adapting client failed: %w", err)
 		return
 	}
 
 	// Read
 	if err = c.read(c.handlePingManager); err != nil {
-		err = errors.Wrap(err, "astiws: reading failed")
+		err = fmt.Errorf("astiws: reading failed: %w", err)
 		return
 	}
 	return
@@ -137,6 +139,6 @@ func (m *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request, a ClientAdap
 func (m *Manager) UnregisterClient(k interface{}) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
-	astilog.Debugf("astiws: unregistering client in astiws manager %p with key %+v", m, k)
+	m.l.Debugf("astiws: unregistering client in astiws manager %p with key %+v", m, k)
 	delete(m.clients, k)
 }

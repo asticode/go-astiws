@@ -9,9 +9,7 @@ import (
 	"time"
 
 	"github.com/asticode/go-astikit"
-	"github.com/asticode/go-astilog"
 	"github.com/gorilla/websocket"
-	"github.com/pkg/errors"
 )
 
 // Constants
@@ -32,6 +30,7 @@ type Client struct {
 	c         ClientConfiguration
 	conn      *websocket.Conn
 	ctx       context.Context
+	l         astikit.CompleteLogger
 	listeners map[string][]ListenerFunc
 	mh        MessageHandler
 	ml        *sync.Mutex // Lock listeners
@@ -58,15 +57,16 @@ type BodyMessageRead struct {
 }
 
 // NewClient creates a new client
-func NewClient(c ClientConfiguration) *Client {
-	return NewClientWithContext(context.Background(), c)
+func NewClient(c ClientConfiguration, l astikit.StdLogger) *Client {
+	return NewClientWithContext(context.Background(), c, l)
 }
 
 // NewClientWithContext creates a new client with a context
-func NewClientWithContext(ctx context.Context, cfg ClientConfiguration) (c *Client) {
+func NewClientWithContext(ctx context.Context, cfg ClientConfiguration, l astikit.StdLogger) (c *Client) {
 	c = &Client{
 		c:         cfg,
 		ctx:       ctx,
+		l:         astikit.AdaptStdLogger(l),
 		listeners: make(map[string][]ListenerFunc),
 		ml:        &sync.Mutex{},
 		mw:        &sync.Mutex{},
@@ -90,14 +90,14 @@ func (c *Client) WithContext(ctx context.Context) *Client {
 // Close closes the client properly
 func (c *Client) Close() (err error) {
 	// Log
-	astilog.DebugCf(c.ctx, "astiws: closing astiws client %p", c)
+	c.l.DebugCf(c.ctx, "astiws: closing astiws client %p", c)
 
 	// There's a connection to close
 	if c.conn != nil {
 		// Send a close frame
-		astilog.DebugCf(c.ctx, "astiws: sending close frame")
+		c.l.DebugCf(c.ctx, "astiws: sending close frame")
 		if err = c.write(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "")); err != nil {
-			err = errors.Wrap(err, "astiws: sending close frame failed")
+			err = fmt.Errorf("astiws: sending close frame failed: %w", err)
 			return
 		}
 
@@ -120,9 +120,9 @@ func (c *Client) DialWithHeaders(addr string, h http.Header) (err error) {
 	}
 
 	// Dial
-	astilog.DebugCf(c.ctx, "astiws: dialing %s with client %p", addr, c)
+	c.l.DebugCf(c.ctx, "astiws: dialing %s with client %p", addr, c)
 	if c.conn, _, err = websocket.DefaultDialer.Dial(addr, h); err != nil {
-		err = errors.Wrapf(err, "astiws: dialing %s failed", addr)
+		err = fmt.Errorf("astiws: dialing %s failed: %w", addr, err)
 		return
 	}
 	return
@@ -152,7 +152,7 @@ func (c *Client) read(handlePing func(ctx context.Context)) (err error) {
 
 	// Extend connection
 	if err = c.ExtendConnection(); err != nil {
-		err = errors.Wrap(err, "astiws: extending connection failed")
+		err = fmt.Errorf("astiws: extending connection failed: %w", err)
 		return
 	}
 
@@ -166,13 +166,13 @@ func (c *Client) read(handlePing func(ctx context.Context)) (err error) {
 		// Read message
 		var m []byte
 		if _, m, err = c.conn.ReadMessage(); err != nil {
-			err = errors.Wrap(err, "astiws: reading message failed")
+			err = fmt.Errorf("astiws: reading message failed: %w", err)
 			return
 		}
 
 		// Handle message
 		if err = c.mh(m); err != nil {
-			astilog.ErrorC(c.ctx, errors.Wrap(err, "astiws: handling message failed"))
+			c.l.ErrorC(c.ctx, fmt.Errorf("astiws: handling message failed: %w", err))
 			continue
 		}
 	}
@@ -183,7 +183,7 @@ func (c *Client) handlePingClient(ctx context.Context) {
 	c.conn.SetPongHandler(func(string) (err error) {
 		// Extend connection
 		if err = c.ExtendConnection(); err != nil {
-			err = errors.Wrap(err, "astiws: extending connection failed")
+			err = fmt.Errorf("astiws: extending connection failed: %w", err)
 			return
 		}
 		return
@@ -203,7 +203,7 @@ func (c *Client) ping(ctx context.Context) {
 			return
 		case <-t.C:
 			if err := c.write(websocket.PingMessage, nil); err != nil {
-				astilog.ErrorC(c.ctx, errors.Wrap(err, "astiws: sending ping message failed"))
+				c.l.ErrorC(c.ctx, fmt.Errorf("astiws: sending ping message failed: %w", err))
 			}
 		}
 	}
@@ -214,13 +214,13 @@ func (c *Client) handlePingManager(ctx context.Context) {
 	c.conn.SetPingHandler(func(string) (err error) {
 		// Extend connection
 		if err = c.ExtendConnection(); err != nil {
-			err = errors.Wrap(err, "astiws: extending connection failed")
+			err = fmt.Errorf("astiws: extending connection failed: %w", err)
 			return
 		}
 
 		// Send pong
 		if err = c.write(websocket.PongMessage, nil); err != nil {
-			err = errors.Wrap(err, "astiws: sending pong message failed")
+			err = fmt.Errorf("astiws: sending pong message failed: %w", err)
 			return
 		}
 		return
@@ -248,7 +248,7 @@ func (c *Client) executeListeners(eventName string, payload json.RawMessage) {
 	for _, f := range fs {
 		// Execute listener
 		if err := f(c, eventName, payload); err != nil {
-			astilog.ErrorC(c.ctx, errors.Wrapf(err, "astiws: executing listener for event %s failed", eventName))
+			c.l.ErrorC(c.ctx, fmt.Errorf("astiws: executing listener for event %s failed: %w", eventName, err))
 			continue
 		}
 	}
@@ -264,13 +264,13 @@ func (c *Client) WriteJSON(m interface{}) (err error) {
 	// Marshal
 	var b []byte
 	if b, err = json.Marshal(m); err != nil {
-		err = errors.Wrap(err, "astiws: marshaling message failed")
+		err = fmt.Errorf("astiws: marshaling message failed: %w", err)
 		return
 	}
 
 	// Write text message
 	if err = c.WriteText(b); err != nil {
-		err = errors.Wrap(err, "astiws: writing text message failed")
+		err = fmt.Errorf("astiws: writing text message failed: %w", err)
 		return
 	}
 	return
@@ -280,7 +280,7 @@ func (c *Client) WriteJSON(m interface{}) (err error) {
 func (c *Client) WriteText(m []byte) (err error) {
 	// Write message
 	if err = c.write(websocket.TextMessage, m); err != nil {
-		err = errors.Wrap(err, "astiws: writing message failed")
+		err = fmt.Errorf("astiws: writing message failed: %w", err)
 		return
 	}
 	return
@@ -329,7 +329,7 @@ func (c *Client) defaultMessageHandler(m []byte) (err error) {
 	// Unmarshal
 	var b BodyMessageRead
 	if err = json.Unmarshal(m, &b); err != nil {
-		err = errors.Wrap(err, "astiws: unmarshaling message failed")
+		err = fmt.Errorf("astiws: unmarshaling message failed: %w", err)
 		return
 	}
 
@@ -361,9 +361,9 @@ func (c *Client) DialAndRead(w *astikit.Worker, o DialAndReadOptions) {
 				}
 
 				// Dial
-				w.Logger().Infof("astiws: dialing %s", o.Addr)
+				c.l.Infof("astiws: dialing %s", o.Addr)
 				if err := c.DialWithHeaders(o.Addr, o.Header); err != nil {
-					w.Logger().Error(errors.Wrapf(err, "astiws: dialing %s failed", o.Addr))
+					c.l.Error(fmt.Errorf("astiws: dialing %s failed: %w", o.Addr, err))
 					time.Sleep(sleepError)
 					continue
 				}
@@ -371,7 +371,7 @@ func (c *Client) DialAndRead(w *astikit.Worker, o DialAndReadOptions) {
 				// Custom callback
 				if o.OnDial != nil {
 					if err := o.OnDial(); err != nil {
-						w.Logger().Error(errors.Wrapf(err, "astiws: custom on dial callback on %s failed", o.Addr))
+						c.l.Error(fmt.Errorf("astiws: custom on dial callback on %s failed: %w", o.Addr, err))
 						time.Sleep(sleepError)
 						continue
 					}
@@ -382,7 +382,7 @@ func (c *Client) DialAndRead(w *astikit.Worker, o DialAndReadOptions) {
 					if o.OnReadError != nil {
 						o.OnReadError(err)
 					} else {
-						w.Logger().Error(errors.Wrapf(err, "astiws: reading on %s failed", o.Addr))
+						c.l.Error(fmt.Errorf("astiws: reading on %s failed: %w", o.Addr, err))
 					}
 					time.Sleep(sleepError)
 					continue
