@@ -88,7 +88,12 @@ func (c *Client) WithContext(ctx context.Context) *Client {
 }
 
 // Close closes the client properly
-func (c *Client) Close() (err error) {
+func (c *Client) Close() error {
+	return c.CloseWithCode(websocket.CloseNormalClosure)
+}
+
+// CloseWithCode closes the client with a specific code
+func (c *Client) CloseWithCode(closeCode int) (err error) {
 	// Log
 	c.l.DebugCf(c.ctx, "astiws: closing astiws client %p", c)
 
@@ -96,7 +101,7 @@ func (c *Client) Close() (err error) {
 	if c.conn != nil {
 		// Send a close frame
 		c.l.DebugCf(c.ctx, "astiws: sending close frame")
-		if err = c.write(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "")); err != nil {
+		if err = c.write(websocket.CloseMessage, websocket.FormatCloseMessage(closeCode, "")); err != nil {
 			err = fmt.Errorf("astiws: sending close frame failed: %w", err)
 			return
 		}
