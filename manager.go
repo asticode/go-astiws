@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/asticode/go-astikit"
 	"github.com/gorilla/websocket"
@@ -17,6 +18,7 @@ type Manager struct {
 	clients  map[interface{}]*Client
 	l        astikit.CompleteLogger
 	mutex    *sync.RWMutex
+	timeout  time.Duration
 	Upgrader websocket.Upgrader
 }
 
@@ -24,6 +26,8 @@ type Manager struct {
 type ManagerConfiguration struct {
 	CheckOrigin    func(r *http.Request) bool `toml:"-"`
 	MaxMessageSize int                        `toml:"max_message_size"`
+	// Timeout after which connections are closed. If Timeout <= 0, default timeout is used.
+	Timeout time.Duration `toml:"timeout"`
 }
 
 // NewManager creates a new manager
@@ -32,6 +36,7 @@ func NewManager(c ManagerConfiguration, l astikit.StdLogger) *Manager {
 		clients: make(map[interface{}]*Client),
 		l:       astikit.AdaptStdLogger(l),
 		mutex:   &sync.RWMutex{},
+		timeout: c.Timeout,
 		Upgrader: websocket.Upgrader{
 			CheckOrigin:     c.CheckOrigin,
 			ReadBufferSize:  c.MaxMessageSize,
@@ -112,6 +117,7 @@ func (m *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request, a ClientAdap
 	// Create client
 	var c = NewClientWithContext(r.Context(), ClientConfiguration{
 		MaxMessageSize: m.Upgrader.WriteBufferSize,
+		Timeout:        m.timeout,
 	}, m.l)
 
 	// Upgrade connection

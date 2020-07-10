@@ -15,8 +15,7 @@ import (
 // Constants
 const (
 	EventNameDisconnect = "astiws.disconnect"
-	PingPeriod          = (pingWait * 9) / 10
-	pingWait            = 60 * time.Second
+	defaultTimeout      = time.Minute
 )
 
 // ListenerFunc represents a listener callback
@@ -35,12 +34,15 @@ type Client struct {
 	mh        MessageHandler
 	ml        *sync.Mutex // Lock listeners
 	mw        *sync.Mutex // Lock write to avoid panics "concurrent write to websocket connection"
+	timeout   time.Duration
 	wg        *sync.WaitGroup
 }
 
 // ClientConfiguration represents a client configuration
 type ClientConfiguration struct {
 	MaxMessageSize int `toml:"max_message_size"`
+	// Timeout after which connections are closed. If Timeout <= 0, default timeout is used.
+	Timeout time.Duration `toml:"timeout"`
 }
 
 // BodyMessage represents the body of a message
@@ -70,7 +72,11 @@ func NewClientWithContext(ctx context.Context, cfg ClientConfiguration, l astiki
 		listeners: make(map[string][]ListenerFunc),
 		ml:        &sync.Mutex{},
 		mw:        &sync.Mutex{},
+		timeout:   cfg.Timeout,
 		wg:        &sync.WaitGroup{},
+	}
+	if c.timeout <= 0 {
+		c.timeout = defaultTimeout
 	}
 	c.SetMessageHandler(c.defaultMessageHandler)
 	return
@@ -200,7 +206,7 @@ func (c *Client) handlePingClient(ctx context.Context) {
 
 // ping writes a ping message in the connection
 func (c *Client) ping(ctx context.Context) {
-	var t = time.NewTicker(PingPeriod)
+	var t = time.NewTicker(9 * c.timeout / 10)
 	defer t.Stop()
 	for {
 		select {
@@ -234,7 +240,7 @@ func (c *Client) handlePingManager(ctx context.Context) {
 
 // ExtendConnection extends the connection
 func (c *Client) ExtendConnection() error {
-	return c.conn.SetReadDeadline(time.Now().Add(pingWait))
+	return c.conn.SetReadDeadline(time.Now().Add(c.timeout))
 }
 
 // executeListeners executes listeners for a specific event
