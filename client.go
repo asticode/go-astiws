@@ -35,7 +35,6 @@ type Client struct {
 	ml        *sync.Mutex // Lock listeners
 	mw        *sync.Mutex // Lock write to avoid panics "concurrent write to websocket connection"
 	timeout   time.Duration
-	wg        *sync.WaitGroup
 }
 
 // ClientConfiguration represents a client configuration
@@ -73,7 +72,6 @@ func NewClientWithContext(ctx context.Context, cfg ClientConfiguration, l astiki
 		ml:        &sync.Mutex{},
 		mw:        &sync.Mutex{},
 		timeout:   cfg.Timeout,
-		wg:        &sync.WaitGroup{},
 	}
 	if c.timeout <= 0 {
 		c.timeout = defaultTimeout
@@ -100,10 +98,6 @@ func (c *Client) Close() error {
 
 // CloseWithCode closes the client with a specific code
 func (c *Client) CloseWithCode(closeCode int) (err error) {
-	// Log
-	c.l.DebugCf(c.ctx, "astiws: closing astiws client %p", c)
-
-	// There's a connection to close
 	if c.conn != nil {
 		// Send a close frame
 		c.l.DebugCf(c.ctx, "astiws: sending close frame")
@@ -111,9 +105,6 @@ func (c *Client) CloseWithCode(closeCode int) (err error) {
 			err = fmt.Errorf("astiws: sending close frame failed: %w", err)
 			return
 		}
-
-		// Wait for the connection to be really closed
-		c.wg.Wait()
 	}
 	return
 }
@@ -146,13 +137,11 @@ func (c *Client) Read() error {
 
 func (c *Client) read(handlePing func(ctx context.Context)) (err error) {
 	// Make sure the connection is properly closed
-	c.wg.Add(1)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer func() {
 		c.conn.Close()
 		c.conn = nil
 		cancel()
-		c.wg.Done()
 		c.executeListeners(EventNameDisconnect, json.RawMessage{})
 	}()
 
