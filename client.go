@@ -26,15 +26,22 @@ type MessageHandler func(m []byte) error
 
 // Client represents a websocket client
 type Client struct {
+	b         []clientBufferItem
 	c         ClientConfiguration
 	conn      *websocket.Conn
 	ctx       context.Context
 	l         astikit.CompleteLogger
 	listeners map[string][]ListenerFunc
+	mb        *sync.Mutex // Locks b
 	mh        MessageHandler
-	ml        *sync.Mutex // Lock listeners
-	mw        *sync.Mutex // Lock write to avoid panics "concurrent write to websocket connection"
+	ml        *sync.Mutex // Locks listeners
+	mw        *sync.Mutex // Locks write to avoid panics "concurrent write to websocket connection"
 	timeout   time.Duration
+}
+
+type clientBufferItem struct {
+	data        []byte
+	messageType int
 }
 
 // ClientConfiguration represents a client configuration
@@ -69,6 +76,7 @@ func NewClientWithContext(ctx context.Context, cfg ClientConfiguration, l astiki
 		ctx:       ctx,
 		l:         astikit.AdaptStdLogger(l),
 		listeners: make(map[string][]ListenerFunc),
+		mb:        &sync.Mutex{},
 		ml:        &sync.Mutex{},
 		mw:        &sync.Mutex{},
 		timeout:   cfg.Timeout,
@@ -160,6 +168,16 @@ func (c *Client) read(handlePing func(ctx context.Context)) (err error) {
 	if handlePing != nil {
 		handlePing(ctx)
 	}
+
+	// Process buffer
+	c.mb.Lock()
+	for _, i := range c.b {
+		if errWrite := c.write(i.messageType, i.data); errWrite != nil {
+			c.l.Error(fmt.Errorf("astiws: writing msg failed: %w", errWrite))
+		}
+	}
+	c.b = []clientBufferItem{}
+	c.mb.Unlock()
 
 	// Loop
 	for {
@@ -289,7 +307,13 @@ func (c *Client) WriteText(m []byte) (err error) {
 func (c *Client) write(messageType int, data []byte) (err error) {
 	// Connection is not set
 	if c.conn == nil {
-		err = fmt.Errorf("astiws: connection is not set for astiws client %p", c)
+		// Store in buffer
+		c.mb.Lock()
+		c.b = append(c.b, clientBufferItem{
+			data:        data,
+			messageType: messageType,
+		})
+		c.mb.Unlock()
 		return
 	}
 
@@ -393,5 +417,4 @@ func (c *Client) DialAndRead(w *astikit.Worker, o DialAndReadOptions) {
 		// Wait for context to be done
 		<-w.Context().Done()
 	})
-
 }
