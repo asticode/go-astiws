@@ -56,7 +56,7 @@ func (m *Manager) Close() error {
 	m.m.Unlock()
 
 	// Loop through clients
-	for c := range m.cs {
+	for _, c := range cs {
 		c.Close()
 	}
 	return nil
