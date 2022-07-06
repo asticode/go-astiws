@@ -305,8 +305,11 @@ func (c *Client) WriteText(m []byte) (err error) {
 }
 
 func (c *Client) write(messageType int, data []byte) (err error) {
+	// Get connection
+	conn := c.conn
+
 	// Connection is not set
-	if c.conn == nil {
+	if conn == nil {
 		// Store in buffer
 		c.mb.Lock()
 		c.b = append(c.b, clientBufferItem{
@@ -320,7 +323,7 @@ func (c *Client) write(messageType int, data []byte) (err error) {
 	// Write
 	c.mw.Lock()
 	defer c.mw.Unlock()
-	return c.conn.WriteMessage(messageType, data)
+	return conn.WriteMessage(messageType, data)
 }
 
 // AddListener adds a listener
