@@ -3,6 +3,7 @@ package astiws
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"sync"
@@ -409,7 +410,12 @@ func (c *Client) DialAndRead(w *astikit.Worker, o DialAndReadOptions) {
 					if o.OnReadError != nil {
 						o.OnReadError(err)
 					} else {
-						c.l.Error(fmt.Errorf("astiws: reading on %s failed: %w", o.Addr, err))
+						var e *websocket.CloseError
+						if ok := errors.As(err, &e); !ok || e.Code != websocket.CloseNormalClosure {
+							c.l.Error(fmt.Errorf("astiws: reading on %s failed: %w", o.Addr, err))
+						} else {
+							c.l.Infof("astiws: reading on %s closed normally", o.Addr)
+						}
 					}
 					time.Sleep(sleepError)
 					continue
