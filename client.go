@@ -228,7 +228,7 @@ func (c *Client) ping(ctx context.Context) {
 	}
 }
 
-func (c *Client) handlePingManager(ctx context.Context) {
+func (c *Client) handlePingServer(ctx context.Context) {
 	// Handle ping message
 	c.conn.SetPingHandler(func(string) (err error) {
 		// Extend connection
